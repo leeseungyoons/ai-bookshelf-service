@@ -1,489 +1,86 @@
-# 도서 관리 서비스
+# 나만의 책장 서비스 (도서 관리 서비스)
 *Aivle School 8기 4차 미니 프로젝트*
 1반 2조 
+
 -----
 
-##  프로젝트 소개
+## 🚀 프로젝트 소개
 
-**나만의 책장 서비스**는 사용자가 직접 글을 작성해서 **나만의 책을 만들고**,  
-AI를 이용해 **표지 이미지를 생성**해서 꾸미고,  
-YES24에서 가져온 **외부 도서 정보까지 검색**할 수 있는 웹 서비스입니다.
+**나만의 책장 서비스**는 사용자가 직접 글을 작성해서 나만의 책을 만들고, AI를 이용해 표지 이미지를 생성하며, 외부 도서 정보(YES24)까지 검색할 수 있는 웹 서비스입니다.
 
-단순한 CRUD 예제에서 끝나는 것이 아니라,
-
-- 회원가입 / 로그인 같은 **기본 인증 플로우**부터,
-- 내가 작성한 책을 등록·조회·수정·삭제하는 **도서 관리 기능**,
-- Jsoup으로 YES24를 크롤링하는 **실시간 도서 검색 기능**,
-- OpenAI를 활용한 **AI 표지 이미지 생성 → 서버에 URL 저장**
-
-까지 한 번에 경험할 수 있도록 설계했습니다.
-
-백엔드와 프론트엔드는 각각 독립된 서버로 동작하며 REST API로 통신합니다.
-
-- **Backend:** Spring Boot (기본 포트: `8080`)
-- **Frontend:** Next.js (기본 포트: `3000`)
+본 프로젝트는 단순한 애플리케이션 개발에 그치지 않고, **AWS EKS(Elastic Kubernetes Service)를 기반으로 한 클라우드 네이티브 아키텍처**로 설계되었습니다. 무중단 배포, 자동 확장, 고가용성 보장 등 실제 서비스 운영 환경에 맞춘 인프라 구성과 CI/CD 파이프라인 구축에 중점을 두었습니다.
 
 ---
 
-## 기술 스택
+## 🏗️ 서비스 아키텍처 및 인프라 설계
+
+![서비스 아키텍처](./.assets/architecture.png)
+
+단순한 기능 구현을 넘어, **실제 운영 환경에서 발생할 수 있는 트래픽 증가와 서버 장애에 유연하게 대응**할 수 있도록 AWS EKS(Kubernetes) 기반의 클라우드 네이티브 아키텍처를 설계했습니다.
+
+### 1. 효율적인 트래픽 분산 (Load Balancing & Nginx)
+사용자 요청이 증가할 때 서버에 부하가 집중되지 않도록 AWS Load Balancer를 연동하여 트래픽 진입점을 구성했습니다. 클러스터 내부에는 Nginx를 배치하여 프론트엔드와 백엔드로 향하는 API 요청을 상황에 맞게 안정적으로 라우팅합니다.
+
+### 2. 단일 장애점 극복과 고가용성 (High Availability)
+특정 데이터센터(가용 영역)에 시스템 장애가 발생하더라도 전체 서비스가 중단되지 않도록 방어하는 데 집중했습니다. `Topology Spread Constraints` 속성을 적용하여 파드(Pod)들을 여러 가용 영역에 분산 배치하였고, 새로운 코드를 배포할 때도 서버를 멈추지 않게 롤링 업데이트(Rolling Update) 기반의 **무중단 배포**를 적용했습니다.
+
+### 3. 장애 발생 시 자동 복구 (Health Check & Self-Healing)
+메모리 누수나 예상치 못한 에러로 애플리케이션이 멈출 경우, 수동 개입 없이 시스템이 스스로 정상화되는 데 초점을 맞췄습니다. 쿠버네티스의 `Liveness Probe`와 `Readiness Probe`를 활용해 주기적으로 헬스 체크를 진행하며, 응답 불가 상태의 파드는 스스로 재시작(Self-Healing)되도록 구성했습니다.
+
+### 4. 트래픽 변화에 따른 유연한 자원 확장 (Auto Scaling)
+이벤트 등으로 갑작스러운 트래픽 폭주가 발생해도 서비스가 버틸 수 있도록 유연한 인프라를 구축했습니다. Cluster Autoscaler(CA)를 구성하여 리소스가 한계에 다다르면 자동으로 서버(EC2 노드)를 늘려 대응(Scale-out)하고, 유휴 상태일 때는 자원을 회수하여 비용 효율성을 높였습니다.
+
+### 5. 데이터 영속성과 보안 유지 (Stateful & Secret)
+애플리케이션을 구동하는 파드는 언제든 생성/삭제될 수 있어 저장소로 적합하지 않습니다. 따라서 도서 및 사용자 정보를 안전하게 보관하기 위해 `StatefulSet`과 AWS EBS 볼륨을 결합하여 PostgreSQL 데이터베이스 환경을 구성했습니다. 또한 DB 접근 계정과 같은 민감한 정보는 소스코드에서 분리하여 쿠버네티스 `Secret`으로 안전하게 주입되도록 처리했습니다.
+
+---
+
+## 🔄 무중단 자동 배포 파이프라인 (CI/CD)
+
+수동 배포 과정에서 발생할 수 있는 휴먼 에러를 방지하고, 개발 생산성을 극대화하기 위해 **AWS 완전 관리형 서비스(CodePipeline, CodeBuild, ECR)**를 활용한 배포 자동화를 달성했습니다.
+
+**[ 파이프라인 동작 흐름 ]**
+
+1. **Source**: GitHub `main` 브랜치에 코드가 병합(Push)되면 AWS CodePipeline이 이를 자동으로 감지하여 빌드/배포 프로세스를 트리거합니다.
+2. **Build & Push**: AWS CodeBuild가 `buildspec.yml` 설정에 맞춰 프론트엔드와 백엔드를 각각 새로운 도커(Docker) 이미지로 빌드합니다. 생성된 이미지는 AWS ECR(프라이빗 컨테이너 레지스트리)로 안전하게 전송됩니다.
+3. **Deploy**: ECR에 등록된 최신 이미지를 바탕으로 EKS 클러스터에 배포 명령(`kubectl apply`)을 수행하여 롤링 업데이트 방식으로 실제 운영 환경에 무중단 반영됩니다.
+
+**[ 파이프라인 설계 주안점 ]**
+- **인프라 운영 최소화**: Jenkins 등의 별도 CI/CD 서버 구성 없이 AWS 네이티브 서비스를 활용하여 관리 포인트를 대폭 줄였습니다.
+- **안정적인 롤백 지원**: 코드 빌드 시점의 Git 커밋 해시(Commit Hash)를 이미지 태그로 사용하여 버전을 식별합니다. 배포 후 예기치 않은 오류가 발생할 경우 확정된 이전 버전 이미지로 신속하게 롤백이 가능합니다.
+
+---
+
+## 💻 어플리케이션 주요 기능 요약
+
+### 1. 사용자 인증 및 관리
+- 회원가입 (이메일, 비밀번호 정책, 중복 검증) 및 이메일+비밀번호 기반 로그인 구현 (세션 기반).
+
+### 2. 나만의 책 만들기 (CRUD)
+- 도서 등록, 전체/상세 조회, 수정 및 삭제 기능 제공.
+
+### 3. AI 표지 이미지 생성
+- 도서 상세 정보 화면에서 **OpenAI API** 연동을 통해 책 제목/내용 기반 프롬프트를 자동 생성하고 이미지를 생성하여 화면에 제공. 선택 시 백엔드 DB와 연동하여 커버 정보(`coverImageUrl`)를 업데이트.
+
+### 4. 실시간 YES24 도서 검색 연동
+- K-웹 스크래핑 라이브러리 `Jsoup`을 활용해 사용자가 입력한 키워드로 YES24 외부 쇼핑몰의 책 제목, 저자, 이미지를 파싱하여 실시간 검색 결과 제공.
+
+---
+
+## 🛠 기술 스택
+
+### Infrastructure & DevOps
+- **Cloud/Infra**: AWS EKS, AWS ECR, AWS LoadBalancer, IAM, EBS
+- **CI/CD**: AWS CodePipeline, AWS CodeBuild (`buildspec.yml`)
+- **Container Orchestration**: Kubernetes (Deployment, StatefulSet, ConfigMap, Secret, Service)
+- **Auto Scaling**: Kubernetes Cluster Autoscaler
 
 ### Backend
-
-- **Java 17**
-- **Spring Boot 3.5.8**
-- **Spring Web** – REST API 개발
-- **Spring Data JPA** – ORM & DB 연동
-- **H2 Database** – 개발용 인메모리/파일 DB
-- **Jsoup** – YES24 도서 정보 HTML 크롤링
-- **Lombok** – 보일러플레이트 코드 제거
-- **Gradle** – 빌드 & 의존성 관리
+- **Java 17, Spring Boot 3.5.8**, Spring Web, Spring Data JPA, Hibernate
+- **Database**: PostgreSQL (EKS 환경), H2 (개발 환경)
+- **Library**: Jsoup, Lombok, Gradle
 
 ### Frontend
+- **Next.js (React 기반)**, React Hooks, MUI, Axios
 
-- **Next.js (React 기반)**
-- **React Hooks** – 상태 관리 (`useState`, `useEffect`, `useRouter` 등)
-- **MUI** – UI 컴포넌트 라이브러리
-- **Axios** – 백엔드 API 통신
-- **fetch** – OpenAI 이미지 API 직접 호출
-- **NPM** – 의존성 관리
-
----
-
-## 주요 기능
-
-### 1.  사용자 관리
-
-- **회원가입 (`/user/join`)**
-  - 이메일, 비밀번호, 이름, 전화번호 입력
-  - 이메일 중복 체크
-  - 필수값 누락, 비밀번호 형식 등 유효성 검증
-  - 예외 상황에 대해 명확한 메시지와 HTTP Status 코드 반환
-
-- **로그인 (`/user/login`)**
-  - 이메일 + 비밀번호로 로그인
-  - 성공 시 `HttpSession`에 `userId` 저장
-  - 이후 API에서 세션 기반으로 사용자 식별 가능하도록 설계
-
-- **로그아웃 (설계)**
-  - 세션 무효화 기반 로그아웃을 고려하여 구조 설계
-
-- **아이디/비밀번호 찾기, 비밀번호 재설정 (설계)**
-  - 이메일 기반 조회 및 임시 비밀번호 발급 등 확장이 가능한 형태로 API 설계
-
----
-
-### 2. 나만의 책 만들기 
-
-- **도서 등록**
-  - 제목, 내용, 저자, (선택) 기본 표지 이미지 URL을 입력해 책 생성
-- **도서 목록 조회**
-  - 사용자가 등록한 책 목록을 카드 형태로 조회
-- **도서 상세 조회**
-  - 책을 클릭하면 상세 페이지로 이동하여 내용, 표지, 작성/수정 시간 등을 확인
-- **도서 수정**
-  - 상세 페이지에서 제목, 내용, 표지 이미지 등을 수정
-- **도서 삭제**
-  - 더 이상 필요 없는 책을 삭제
-
-여기에 **AI 표지 이미지 생성 기능**이 연동되어, 사용자가 만든 책을 실제 책처럼 꾸밀 수 있습니다.
-
----
-
-### 3.  YES24 도서 검색
-
-- 사용자가 키워드를 입력하면 YES24 도서 검색 결과 페이지를 **Jsoup**으로 크롤링
-- 도서 **제목 / 저자 / 표지 이미지**를 파싱 후 백엔드에서 JSON으로 반환
-- 프론트엔드에서 해당 결과를 리스트 형태로 렌더링
-- 필요 시 YES24 상세 페이지로 이동하도록 설계
-
-이를 통해 **내가 만든 책 + 실제 서점 도서 정보**를 동시에 탐색할 수 있습니다.
-
----
-
-### 4.  AI 표지 이미지 생성
-
-4일차 핵심 미션은 **OpenAI 이미지 API를 이용해 도서 표지를 생성하는 것**입니다.
-
-1. 사용자가 **도서 상세 페이지**에서 “AI 표지 생성” 버튼 클릭  
-2. (필요할 경우) 본인의 **OpenAI API Key**를 입력  
-3. 프론트엔드에서 책 제목/내용을 기반으로 prompt 생성  
-4. `fetch`를 이용해 OpenAI 이미지 생성 API 호출  
-5. 응답으로 전달받은 **이미지 URL**을 추출해 화면에 미리보기로 표시  
-6. 사용자가 “이 이미지를 표지로 저장”을 선택하면
-   - 백엔드 API(`PATCH /book/createImg/{bookId}`)로 이미지 URL 전송
-   - 백엔드에서 해당 도서의 `coverImageUrl` 필드를 업데이트 후 DB에 반영
-7. 이후 목록/상세 페이지에서 **AI로 생성한 표지 이미지**가 표시됨
-
-추가로,
-
-- 생성 중에는 “표지 생성 중…” 과 같은 안내 문구 및 로딩 상태 관리!
-- 실패 시 에러 메시지를 보여주고 기존 표지를 유지해 UX를 보완!
-
----
-
-
-## 백엔드 상세 API 명세
-
-> 이 섹션은 Postman 테스트용으로 정리한 백엔드 API 목록입니다.  
-> 실제 프로젝트에서 구현한 **검증 / 예외 처리 / 동작 흐름** 기준으로 작성했습니다.
-
----
-
-### 4-1. 사용자 인증
-
-#### 4-1-1. 회원가입
-
-- **URL**: `POST /user/join`
-- **설명**
-  - 이메일 중복을 검사한 뒤 신규 회원을 저장한다.
-  - 잘못된 이메일, 비밀번호 정책 미충족, 비밀번호 재확인 불일치 등에 대해 **자세한 에러 메시지**를 반환한다.
-
-##### Request Body
-
-~~~json
-{
-  "email": "test@example.com",
-  "password": "Password123!",
-  "confirmPassword": "Password123!",
-  "nickname": "홍길동",
-  "phone": "010-1234-5678"
-}
-~~~
-
-##### 동작
-
-- `UserSignUpRequest` DTO로 요청 데이터를 매핑
-- `UserService.signUp()`에서 순서대로 검증
-  - 이메일 형식 검증 (정규식)
-  - 비밀번호 / 비밀번호 확인 일치 여부
-  - 비밀번호 정책 검사 (길이, 대/소문자, 숫자, 특수문자 포함 여부)
-  - 이미 가입된 이메일인지 **중복 체크**
-- 검증이 모두 통과하면 `UserInfo` 엔티티를 생성해 DB에 저장
-- 저장된 사용자의 `userId`, `email`을 응답으로 반환
-
-##### Response (성공 – 201 Created)
-
-~~~json
-{
-  "status": "success",
-  "message": "회원가입 성공",
-  "data": {
-    "userId": 1,
-    "email": "test@example.com"
-  }
-}
-~~~
-
-##### 예외 케이스 (예시)
-
-- **이메일 중복**
-  - HTTP 400
-  - 메시지: `"이미 가입된 이메일입니다."`
-- **비밀번호 정책 위반 / 불일치**
-  - HTTP 400  
-    예: `"비밀번호 형식을 다시 확인해주세요."`, `"비밀번호와 확인 비밀번호가 일치하지 않습니다."`
-- **기타 서버 오류**
-  - HTTP 500  
-    메시지: `"서버 내부 오류가 발생했습니다. 관리자에게 문의해주세요."`
-
----
-
-#### 4-1-2. 로그인
-
-- **URL**: `POST /user/login`
-- **설명**
-  - 이메일과 비밀번호로 로그인하고, 성공 시 `HttpSession`에 `user`(userId)를 저장한다.
-
-##### Request Body
-
-~~~json
-{
-  "email": "test@example.com",
-  "password": "Password123!"
-}
-~~~
-
-##### 동작
-
-- `LoginService`에서 `email + password`로 사용자 조회
-- 일치하는 사용자가 있을 경우
-  - 세션에 `user` 속성으로 `userId` 저장
-- 로그인 실패 시
-  - 적절한 에러 메시지와 상태 코드 반환  
-    (예: 401 Unauthorized, `"이메일 또는 비밀번호가 올바르지 않습니다."`)
-
-##### Response (성공 – 200 OK)
-
-~~~text
-로그인 성공
-~~~
-
----
-
-### 4-2. 도서 관리 API
-
-#### 4-2-1. 나만의 도서 목록 조회
-
-- **URL**: `GET /book/list`
-- **설명**
-  - 로그인한 사용자가 작성한 도서 목록을 **최신순**으로 조회한다.
-
-##### 예시 Request
-
-~~~http
-GET /book/list
-~~~
-
-##### Response (성공 – 200 OK)
-
-~~~json
-[
-  {
-    "bookId": 1,
-    "title": "첫 번째 책",
-    "author": "작성자",
-    "coverImageUrl": "https://example.com/image1.png",
-    "createdAt": "2025-12-05T10:00:00",
-    "updatedAt": null
-  },
-  {
-    "bookId": 2,
-    "title": "두 번째 책",
-    "author": "작성자",
-    "coverImageUrl": null,
-    "createdAt": "2025-12-06T09:30:00",
-    "updatedAt": null
-  }
-]
-~~~
-
----
-
-#### 4-2-2. 도서 상세 조회
-
-- **URL**: `GET /book/detail/{id}`
-
-##### 예시 Request
-
-~~~http
-GET /book/detail/1
-~~~
-
-##### Response (성공 – 200 OK)
-
-~~~json
-{
-  "bookId": 1,
-  "title": "첫 번째 책",
-  "content": "내용…",
-  "author": "작성자",
-  "coverImageUrl": "https://example.com/image1.png",
-  "createdAt": "2025-12-05T10:00:00",
-  "updatedAt": null
-}
-~~~
-
----
-
-#### 4-2-3. 도서 등록
-
-- **URL**: `POST /book/insert`
-- **설명**
-  - 제목/내용/작성자를 입력받아 새로운 책을 생성한다.
-  - 표지 이미지는 최초에는 `null`로 저장되며, 이후 AI 표지 생성 시 업데이트된다.
-
-##### Request Body
-
-~~~json
-{
-  "title": "새로운 책",
-  "content": "책 내용입니다.",
-  "author": "홍길동",
-  "coverImageUrl": null
-}
-~~~
-
-##### 동작
-
-- 필수 값(제목, 내용 등) 유효성 검사
-- 현재 로그인한 사용자 기준으로 `author` 또는 `userId` 매핑
-- `Book` 엔티티 생성 후 DB 저장
-
-##### Response (성공 – 201 Created)
-
-~~~json
-{
-  "bookId": 3,
-  "title": "새로운 책",
-  "content": "책 내용입니다.",
-  "author": "홍길동",
-  "coverImageUrl": null,
-  "createdAt": "2025-12-05T11:00:00",
-  "updatedAt": null
-}
-~~~
-
----
-
-#### 4-2-4. 도서 수정
-
-- **URL**: `PUT /book/update/{id}`
-- **설명**
-  - 기존에 작성한 책의 제목/내용/표지 이미지를 수정한다.
-
-##### Request Body
-
-~~~json
-{
-  "title": "수정된 제목",
-  "content": "수정된 내용입니다.",
-  "coverImageUrl": "https://example.com/changed.png"
-}
-~~~
-
-##### 동작
-
-- `id`로 기존 도서를 조회
-- 없으면 404 Not Found 에러 반환
-- 요청 값으로 필드를 업데이트 후 DB 저장
-- 수정된 도서 정보를 응답으로 반환
-
-##### Response (성공 – 200 OK)
-
-~~~json
-{
-  "bookId": 1,
-  "title": "수정된 제목",
-  "content": "수정된 내용입니다.",
-  "author": "작성자",
-  "coverImageUrl": "https://example.com/changed.png",
-  "createdAt": "2025-12-05T10:00:00",
-  "updatedAt": "2025-12-06T09:40:00"
-}
-~~~
-
----
-
-#### 4-2-5. 도서 삭제
-
-- **URL**: `DELETE /book/delete/{id}`
-- **설명**
-  - 더 이상 필요 없는 책을 삭제한다.
-
-##### 예시 Request
-
-~~~http
-DELETE /book/delete/1
-~~~
-
-##### 동작
-
-- `id`로 도서를 조회 후 존재하면 삭제
-- 이미 삭제된 경우 404 Not Found 반환
-
-##### Response (성공 – 204 No Content)
-
-- 본문 없음
-
----
-
-#### 4-2-6. AI 표지 이미지 URL 저장
-
-- **URL**: `PATCH /book/createImg/{bookId}`
-- **설명**
-  - 프론트엔드에서 OpenAI API로 생성한 표지 이미지 URL을 전달하면,  
-    해당 도서의 `coverImageUrl` 필드를 업데이트한다.
-
-##### Request Body
-
-~~~json
-{
-  "coverImageUrl": "https://generated-image-url-from-openai.com/image.png"
-}
-~~~
-
-##### 동작
-
-- `bookId`로 도서 엔티티 조회
-- 없다면 404 Not Found
-- `coverImageUrl` 필드를 요청 값으로 변경
-- 변경된 도서를 저장한 뒤, 최종 도서 정보를 반환
-
-##### Response (성공 – 200 OK)
-
-~~~json
-{
-  "bookId": 1,
-  "title": "나의 책",
-  "content": "내용…",
-  "author": "작성자",
-  "coverImageUrl": "https://generated-image-url-from-openai.com/image.png",
-  "createdAt": "2025-12-05T10:00:00",
-  "updatedAt": "2025-12-06T10:20:00"
-}
-~~~
-
----
-
-### 4-3. YES24 도서 검색 API
-
-#### 4-3-1. 키워드 기반 도서 검색
-
-- **URL**: `GET /books/search?query={keyword}`
-- **설명**
-  - YES24 검색 결과 페이지를 `Jsoup`으로 크롤링하여  
-    **제목 / 저자 / 표지 이미지 / 상세 링크**를 파싱한 뒤 JSON 배열로 반환한다.
-
-##### 예시 Request
-
-~~~http
-GET /books/search?query=자바
-~~~
-
-##### Response (성공 – 200 OK)
-
-~~~json
-[
-  {
-    "title": "자바의 정석",
-    "author": "남궁성",
-    "imageUrl": "https://image.yes24.com/.../java1.jpg",
-    "link": "https://www.yes24.com/Product/Goods/123456"
-  },
-  {
-    "title": "이펙티브 자바",
-    "author": "조슈아 블로크",
-    "imageUrl": "https://image.yes24.com/.../java2.jpg",
-    "link": "https://www.yes24.com/Product/Goods/654321"
-  }
-]
-~~~
-
----
-
-### 4-4. AI 표지 이미지 생성 전체 플로우 (요약)
-
-> 프론트엔드와 백엔드가 어떻게 연동되는지 **한 번에 보기 좋게 정리한 흐름**입니다.
-
-1. 사용자가 도서 상세 페이지에서 **“AI 표지 생성”** 버튼 클릭  
-2. 사용자가 본인의 **OpenAI API Key**를 입력  
-3. 프론트엔드에서
-   - 도서 제목/내용 + 사용자가 선택한 옵션(모델, 스타일, 품질 등)을 합쳐 **프롬프트** 생성
-   - `fetch`를 사용해 `https://api.openai.com/v1/images/generations`에 POST 요청
-   - 응답 JSON에서 생성된 표지 이미지 URL 추출
-4. 생성된 URL을 **미리보기 이미지**로 화면에 표시  
-5. 사용자가 **“이 이미지로 표지 저장”** 버튼을 누르면
-   - 프론트엔드에서 `PATCH /book/createImg/{bookId}` 호출
-   - Request Body에 `coverImageUrl`을 담아서 전송
-6. 백엔드에서는
-   - 해당 도서를 조회하고 `coverImageUrl` 필드 업데이트
-   - DB 저장 후 변경된 도서 정보를 반환
-7. 저장 성공 시
-   - 목록/상세 페이지에서 새로 생성된 표지 이미지가 바로 반영
-8. 에러 처리
-   - 잘못된 API 키, 호출 제한 초과, OpenAI 응답 오류 등은  
-     `coverGenerationError` 상태 값과 안내 문구로 관리하여  
-     사용자가 원인을 파악할 수 있도록 했다.
-
----
 

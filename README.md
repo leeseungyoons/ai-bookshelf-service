@@ -1,4 +1,6 @@
 # 나만의 책장 서비스 (도서 관리 서비스)
+[📄 포트폴리오 PDF 보기](.assets/KT%20AIVLE%20School%20Mini%20Project%205.pdf)
+
 *Aivle School 8기 4차 미니 프로젝트*
 1반 2조 
 
